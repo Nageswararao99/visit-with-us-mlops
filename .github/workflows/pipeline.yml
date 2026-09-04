@@ -1,0 +1,89 @@
+name: Wellness Package MLOps Pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  data-registration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Register and validate dataset
+        run: python src/data_register.py
+
+  data-preparation:
+    needs: data-registration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run data preparation
+        run: python src/data_prep.py
+      - name: Upload processed train/test split as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: processed-data
+          path: data/processed/
+
+  model-building:
+    needs: data-preparation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Download processed train/test split
+        uses: actions/download-artifact@v4
+        with:
+          name: processed-data
+          path: data/processed/
+      - name: Train, tune and evaluate candidate models
+        run: python src/train.py
+      - name: Upload trained model as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: trained-model
+          path: model/
+
+  commit-model:
+    needs: model-building
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Download trained model artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: trained-model
+          path: model/
+      - name: Commit best model to repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add model/best_model.joblib model/best_model_metadata.json
+          git diff --staged --quiet || git commit -m "Automated: update best model [skip ci]"
+          git push origin main
